@@ -3,9 +3,10 @@ name: Build installers
 on:
   push:
     branches: [main]
-    tags:
-      - 'v*'          # запускается при тегах вида v1.0.0, v1.2.3 и т.д.
-  workflow_dispatch:  # ручной запуск из GitHub UI
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   # ─────────────────────────────────────────────
@@ -13,33 +14,27 @@ jobs:
   # ─────────────────────────────────────────────
   build-windows:
     runs-on: windows-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          pip install pyinstaller openpyxl
+        run: pip install pyinstaller openpyxl
 
-      - name: Build .exe
-        run: |
-          pyinstaller expense_analyzer.spec
+      - name: Build exe
+        run: pyinstaller expense_analyzer.spec
 
-      - name: Upload .exe artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: AnalyzDebitCredit-Windows
           path: dist/AnalyzDebitCredit.exe
           retention-days: 30
 
-      # Если это тег — прикрепляем к релизу
-      - name: Attach to GitHub Release
+      - name: Attach to Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
@@ -50,48 +45,35 @@ jobs:
   # ─────────────────────────────────────────────
   build-macos:
     runs-on: macos-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          pip install pyinstaller openpyxl
-          brew install create-dmg
+        run: pip install pyinstaller openpyxl
 
-      - name: Build .app
-        run: |
-          pyinstaller expense_analyzer.spec
+      - name: Build app
+        run: pyinstaller expense_analyzer.spec
 
-      - name: Create .dmg
+      - name: Create dmg
         run: |
-          create-dmg \
-            --volname "Анализ дебита и кредита" \
-            --volicon "dist/AnalyzDebitCredit.app" \
-            --window-pos 200 120 \
-            --window-size 600 400 \
-            --icon-size 100 \
-            --icon "AnalyzDebitCredit.app" 175 190 \
-            --hide-extension "AnalyzDebitCredit.app" \
-            --app-drop-link 425 190 \
-            "dist/AnalyzDebitCredit.dmg" \
-            "dist/AnalyzDebitCredit.app" \
-          || true   # create-dmg выходит с кодом 1 если нет иконки — это ок
+          hdiutil create \
+            -volname "AnalyzDebitCredit" \
+            -srcfolder "dist/AnalyzDebitCredit.app" \
+            -ov -format UDZO \
+            "dist/AnalyzDebitCredit.dmg"
 
-      - name: Upload .dmg artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: AnalyzDebitCredit-macOS
           path: dist/AnalyzDebitCredit.dmg
           retention-days: 30
 
-      - name: Attach to GitHub Release
+      - name: Attach to Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
