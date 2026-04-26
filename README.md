@@ -1,85 +1,60 @@
 # Анализ дебита и кредита
 
-Десктопное приложение для подсчёта дебита, кредита и разницы из Excel-файлов (.xlsx).
+Приложение для автоматического подсчёта дебита, кредита и разницы из банковских выписок Excel (.xlsx).
+
+## Скачать
+
+| Платформа | Ссылка |
+|-----------|--------|
+| 🪟 Windows | [Скачать .exe](https://github.com/solovievvv/gzhi-analyzer/releases/latest/download/AnalyzDebitCredit.exe) |
+| 🍎 macOS   | [Скачать .dmg](https://github.com/solovievvv/gzhi-analyzer/releases/latest/download/AnalyzDebitCredit.dmg) |
+
+> Всегда доступна последняя версия. Все [релизы](https://github.com/solovievvv/gzhi-analyzer/releases).
 
 ---
 
-## Запуск из исходников (разработка)
+## Как пользоваться
+
+**Windows** — скачай `.exe` и запусти. Установка не нужна.
+
+**macOS** — скачай `.dmg`, открой, перетащи приложение в папку Applications.
+При первом запуске: правой кнопкой на приложение → **Открыть** → **Открыть**.
+
+---
+
+## Логика расчёта
+
+- Приложение автоматически находит столбцы «дебит» и «кредит» на каждом листе
+- Анализируются все листы книги
+- Строки с упоминанием **вклада** или **депозита** исключаются из расчёта
+- Строки с **процентами** по вкладу/депозиту — остаются (это доход)
+
+---
+
+## Разработка
 
 ```bash
 python -m venv .venv
-# Windows:
-.venv\Scripts\Activate.ps1
-# macOS:
-source .venv/bin/activate
+.venv\Scripts\Activate.ps1   # Windows
+# source .venv/bin/activate  # macOS
 
 pip install -r requirements.txt
 python main.py
 ```
 
----
-
-## Сборка установщиков
-
-### Автоматически через GitHub Actions (рекомендуется)
-
-1. Залей код на GitHub в ветку `main`
-2. Actions сам соберёт `.exe` и `.dmg`
-3. Скачай готовые файлы во вкладке **Actions → последний run → Artifacts**
-
-**Выпуск новой версии:**
+Тесты:
 ```bash
-git tag v1.0.1
-git push origin v1.0.1
+python tests/test_processor.py
 ```
-GitHub создаст Release и прикрепит к нему оба файла автоматически.
 
----
-
-### Вручную на Windows → .exe
-
-```bat
-build_windows.bat
-```
-Результат: `dist\AnalyzDebitCredit.exe`
-
-### Вручную на macOS → .dmg
+## Обновление
 
 ```bash
-chmod +x build_mac.sh
-./build_mac.sh
+git add .
+git commit -m "описание изменений"
+git push
+
+# Новый релиз:
+git tag v1.x.x
+git push origin v1.x.x
 ```
-Результат: `dist/AnalyzDebitCredit.dmg`
-
----
-
-## Структура проекта
-
-```
-expense_analyzer/
-├── main.py                     — GUI (tkinter)
-├── processor.py                — логика чтения xlsx
-├── requirements.txt            — зависимости для разработки
-├── expense_analyzer.spec       — конфиг PyInstaller
-├── build_windows.bat           — сборка на Windows
-├── build_mac.sh                — сборка на macOS
-├── test_processor.py           — тесты (17 кейсов)
-└── .github/
-    └── workflows/
-        └── build.yml           — CI/CD: авто-сборка при push/тег
-```
-
----
-
-## Как обновить приложение
-
-1. Внеси правки в `main.py` или `processor.py`
-2. Прогони тесты: `python test_processor.py`
-3. Залей на GitHub:
-   ```bash
-   git add .
-   git commit -m "fix: описание изменений"
-   git push
-   ```
-4. Actions пересобирает оба бинарника автоматически.
-   Для публичного релиза: `git tag v1.x.x && git push origin v1.x.x`
