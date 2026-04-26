@@ -3,15 +3,14 @@ name: Build installers
 on:
   push:
     branches: [main]
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  # ─────────────────────────────────────────────
-  # Windows → .exe
-  # ─────────────────────────────────────────────
   build-windows:
     runs-on: windows-latest
     steps:
@@ -40,9 +39,6 @@ jobs:
         with:
           files: dist/AnalyzDebitCredit.exe
 
-  # ─────────────────────────────────────────────
-  # macOS → .dmg
-  # ─────────────────────────────────────────────
   build-macos:
     runs-on: macos-latest
     steps:
