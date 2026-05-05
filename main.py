@@ -1,12 +1,19 @@
 import os
 import sys
 
-# Фикс путей TCL/TK для Windows (когда Python установлен без них в PATH)
-_python_dir = os.path.dirname(sys.executable)
-_tcl_dir = os.path.join(_python_dir, "tcl")
-if os.path.isdir(_tcl_dir):
-    os.environ.setdefault("TCL_LIBRARY", os.path.join(_tcl_dir, "tcl8.6"))
-    os.environ.setdefault("TK_LIBRARY", os.path.join(_tcl_dir, "tk8.6"))
+# Fix TCL/TK paths for Windows
+_dirs_to_check = [
+    os.path.dirname(sys.executable),
+    os.path.join(os.path.dirname(sys.executable), "..", ".."),
+    r"C:\Users\Володя\AppData\Local\Programs\Python\Python313",
+]
+for _base in _dirs_to_check:
+    _tcl = os.path.join(_base, "tcl", "tcl8.6")
+    _tk  = os.path.join(_base, "tcl", "tk8.6")
+    if os.path.isdir(_tcl) and os.path.isdir(_tk):
+        os.environ.setdefault("TCL_LIBRARY", _tcl)
+        os.environ.setdefault("TK_LIBRARY",  _tk)
+        break
 
 from app.ui.app_window import AppWindow
 
