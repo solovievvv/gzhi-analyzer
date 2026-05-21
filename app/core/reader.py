@@ -1,7 +1,13 @@
 """
-Чтение xlsx и извлечение транзакций по листам.
+Чтение xlsx/xls и извлечение транзакций по листам.
+
+Поддерживаемые форматы:
+  - .xlsx, .xlsm  — через openpyxl
+  - .xls          — пробуем как xlsx (часто переименованные xlsx),
+                    затем через xlrd (настоящий бинарный xls)
 """
 from typing import Optional
+import io
 import openpyxl
 
 from app.core.models import (
@@ -12,15 +18,84 @@ from app.core.date_parser import parse_date
 from app.core.deduplicator import deduplicate_folder
 
 
+# ── Загрузка файла ────────────────────────────────────────────────────────────
+
+def _load_workbook(filepath: str):
+    """
+    Открывает файл и возвращает openpyxl Workbook.
+    Определяет формат по содержимому (сигнатуре), а не по расширению.
+    """
+    with open(filepath, "rb") as f:
+        raw = f.read()
+
+    # PK = ZIP-архив = xlsx/xlsm (даже если расширение .xls)
+    if raw[:2] == b"PK":
+        return openpyxl.load_workbook(io.BytesIO(raw), data_only=True)
+
+    # D0 CF = OLE2 = настоящий бинарный .xls
+    if raw[:2] == b"\xd0\xcf":
+        try:
+            import xlrd
+            xls_wb = xlrd.open_workbook(file_contents=raw)
+            return _xlrd_to_openpyxl(xls_wb)
+        except ImportError:
+            raise RuntimeError(
+                "Файл в формате .xls (старый Excel). "
+                "Установите xlrd: pip install xlrd==1.2.0"
+            )
+
+    # Последняя попытка — просто openpyxl
+    return openpyxl.load_workbook(io.BytesIO(raw), data_only=True)
+
+
+def _xlrd_to_openpyxl(xls_wb):
+    """
+    Конвертирует xlrd Workbook в openpyxl Workbook в памяти.
+    Сохраняет значения ячеек и имена листов.
+    """
+    import xlrd
+    from datetime import datetime, date as date_type
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    for sheet_idx in range(xls_wb.nsheets):
+        xls_ws = xls_wb.sheet_by_index(sheet_idx)
+        ws = wb.create_sheet(title=xls_ws.name)
+
+        for r in range(xls_ws.nrows):
+            for c in range(xls_ws.ncols):
+                cell = xls_ws.cell(r, c)
+                ctype = cell.ctype
+
+                if ctype == xlrd.XL_CELL_EMPTY:
+                    value = None
+                elif ctype == xlrd.XL_CELL_TEXT:
+                    value = cell.value
+                elif ctype == xlrd.XL_CELL_NUMBER:
+                    value = cell.value
+                    # Целые числа без дробной части
+                    if isinstance(value, float) and value.is_integer():
+                        value = int(value)
+                elif ctype == xlrd.XL_CELL_DATE:
+                    try:
+                        tup = xlrd.xldate_as_tuple(cell.value, xls_wb.datemode)
+                        value = datetime(*tup) if tup[3:] != (0, 0, 0) else date_type(*tup[:3])
+                    except Exception:
+                        value = cell.value
+                elif ctype == xlrd.XL_CELL_BOOLEAN:
+                    value = bool(cell.value)
+                else:
+                    value = cell.value
+
+                ws.cell(row=r + 1, column=c + 1, value=value)
+
+    return wb
+
+
 # ── Поиск заголовков ─────────────────────────────────────────────────────────
 
 def find_columns(sheet) -> tuple[Optional[int], Optional[int], Optional[int], Optional[int]]:
-    """
-    Возвращает (header_row, date_col, debit_col, credit_col).
-    Среди кандидатов выбираем таблицу с наибольшим числом строк
-    с валидными финансовыми значениями (0..10^12).
-    Это отсеивает сводные таблицы и таблицы где в дебит/кредит попали даты.
-    """
     candidates = []
     for row in sheet.iter_rows():
         d_col = c_col = None
@@ -28,9 +103,9 @@ def find_columns(sheet) -> tuple[Optional[int], Optional[int], Optional[int], Op
             if not (cell.value and isinstance(cell.value, str)):
                 continue
             v = cell.value.lower()
-            if ('дебит' in v or 'дебет' in v) and d_col is None:
+            if ("дебит" in v or "дебет" in v) and d_col is None:
                 d_col = cell.column
-            if 'кредит' in v and c_col is None:
+            if "кредит" in v and c_col is None:
                 c_col = cell.column
         if d_col and c_col:
             candidates.append((row[0].row, d_col, c_col))
@@ -48,7 +123,6 @@ def find_columns(sheet) -> tuple[Optional[int], Optional[int], Optional[int], Op
 
 
 def _is_valid_amount(value) -> bool:
-    """True если значение похоже на реальную финансовую сумму (0..10^12)."""
     if value is None:
         return False
     if isinstance(value, (int, float)):
@@ -61,11 +135,6 @@ def _is_valid_amount(value) -> bool:
 
 
 def _pick_best_candidate(sheet, candidates: list) -> tuple:
-    """
-    Из кандидатов выбирает тот, под которым максимум строк
-    с валидными финансовыми значениями.
-    Таблицы где в дебит/кредит попали даты (3e+19) или коды — отсеиваются.
-    """
     best = candidates[0]
     best_count = 0
 
@@ -97,7 +166,7 @@ def _find_date_col_in_window(sheet, header_row: int, window: int) -> Optional[in
     for r in range(start, end + 1):
         for cell in sheet[r]:
             if cell.value and isinstance(cell.value, str):
-                if 'дата' in cell.value.lower():
+                if "дата" in cell.value.lower():
                     return cell.column
     return None
 
@@ -154,11 +223,11 @@ def is_label(value) -> bool:
     if not isinstance(value, str):
         return False
     s = value.strip()
-    if not s or s in ('-', '—'):
+    if not s or s in ("-", "—"):
         return False
-    cleaned = s.replace('\xa0', '').replace(' ', '').replace(',', '.')
-    if '-' in cleaned:
-        parts = cleaned.split('-')
+    cleaned = s.replace("\xa0", "").replace(" ", "").replace(",", ".")
+    if "-" in cleaned:
+        parts = cleaned.split("-")
         if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
             return False
     try:
@@ -175,14 +244,14 @@ def to_float(value) -> Optional[float]:
         return float(value)
     if isinstance(value, str):
         s = value.strip()
-        if not s or s in ('-', '—'):
+        if not s or s in ("-", "—"):
             return None
-        if '-' in s:
-            parts = s.split('-')
+        if "-" in s:
+            parts = s.split("-")
             if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
                 return float(f"{parts[0]}.{parts[1]}")
             return None
-        cleaned = s.replace('\xa0', '').replace(' ', '').replace(',', '.')
+        cleaned = s.replace("\xa0", "").replace(" ", "").replace(",", ".")
         try:
             return float(cleaned)
         except ValueError:
@@ -196,7 +265,7 @@ def get_description(sheet, row_idx: int, start_col: int) -> str:
         val = sheet.cell(row=row_idx, column=col).value
         if val is not None and isinstance(val, str) and val.strip():
             parts.append(val.strip())
-    return ' '.join(parts)
+    return " ".join(parts)
 
 
 # ── Обработка листа ───────────────────────────────────────────────────────────
@@ -257,7 +326,7 @@ def process_sheet(sheet) -> SheetResult:
 
 def process_file(filepath: str) -> AnalysisResult:
     try:
-        wb = openpyxl.load_workbook(filepath, data_only=True)
+        wb = _load_workbook(filepath)
     except Exception as e:
         raise RuntimeError(f"Не удалось открыть файл: {e}")
 
@@ -273,10 +342,10 @@ def process_folder(folderpath: str) -> FolderResult:
     xlsx_files = sorted([
         os.path.join(folderpath, f)
         for f in os.listdir(folderpath)
-        if f.lower().endswith(('.xlsx', '.xlsm')) and not f.startswith('~$')
+        if f.lower().endswith((".xlsx", ".xlsm", ".xls")) and not f.startswith("~$")
     ])
     if not xlsx_files:
-        raise RuntimeError("В папке не найдено файлов Excel (.xlsx, .xlsm)")
+        raise RuntimeError("В папке не найдено файлов Excel (.xlsx, .xlsm, .xls)")
     for filepath in xlsx_files:
         result.files.append(process_file(filepath))
     deduplicate_folder(result)
