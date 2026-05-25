@@ -325,6 +325,10 @@ def process_sheet(sheet) -> SheetResult:
 # ── Обработка файла и папки ───────────────────────────────────────────────────
 
 def process_file(filepath: str) -> AnalysisResult:
+    if _is_xml_file(filepath):
+        from app.core.xml_reader import parse_xml_file
+        return parse_xml_file(filepath)
+
     try:
         wb = _load_workbook(filepath)
     except Exception as e:
@@ -342,11 +346,25 @@ def process_folder(folderpath: str) -> FolderResult:
     xlsx_files = sorted([
         os.path.join(folderpath, f)
         for f in os.listdir(folderpath)
-        if f.lower().endswith((".xlsx", ".xlsm", ".xls")) and not f.startswith("~$")
+        if f.lower().endswith((".xlsx", ".xlsm", ".xls", ".xml")) and not f.startswith("~$")
     ])
     if not xlsx_files:
-        raise RuntimeError("В папке не найдено файлов Excel (.xlsx, .xlsm, .xls)")
+        raise RuntimeError("В папке не найдено файлов Excel (.xlsx, .xlsm, .xls, .xml)")
     for filepath in xlsx_files:
         result.files.append(process_file(filepath))
     deduplicate_folder(result)
     return result
+
+
+# ── XML поддержка ─────────────────────────────────────────────────────────────
+
+def _is_xml_file(filepath: str) -> bool:
+    ext = filepath.lower().rsplit(".", 1)[-1]
+    if ext == "xml":
+        return True
+    # Проверяем сигнатуру для файлов без расширения
+    try:
+        with open(filepath, "rb") as f:
+            return f.read(5) == b"<?xml"
+    except Exception:
+        return False
