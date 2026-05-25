@@ -6,7 +6,7 @@ import threading
 from app.ui import styles
 from app.ui.widgets.file_picker import FilePicker
 from app.ui.widgets.stat_cards import StatCards
-from app.ui.widgets.results_table import ResultsTable
+from app.ui.widgets.results_table import ResultsTable, ICON_SUCCESS, COPY_REVERT_MS
 from app.core.reader import process_file, process_folder
 
 
@@ -14,8 +14,8 @@ class AppWindow(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Анализ дебита и кредита")
-        self.geometry("860x600")
-        self.minsize(700, 500)
+        self.geometry("920x620")
+        self.minsize(720, 500)
         self.configure(bg=styles.BG)
         styles.apply(self)
         self._build()
@@ -29,7 +29,7 @@ class AppWindow(tk.Tk):
                  font=("Segoe UI", 13, "bold"),
                  bg=styles.BG, fg=styles.TEXT).pack(anchor="w")
         tk.Label(pad,
-                 text="Загрузите Excel-файл или папку — приложение найдёт столбцы и подсчитает итоги.",
+                 text="Загрузите Excel или XML файл / папку — приложение найдёт столбцы и подсчитает итоги.",
                  bg=styles.BG, fg=styles.MUTED,
                  font=("Segoe UI", 9)).pack(anchor="w", pady=(2, 12))
 
@@ -37,7 +37,7 @@ class AppWindow(tk.Tk):
         self.file_picker = FilePicker(pad)
         self.file_picker.pack(fill="x", pady=(0, 12))
 
-        # Кнопка + статус
+        # Панель действий: Рассчитать + статус + Копировать всё
         btn_row = tk.Frame(pad, bg=styles.BG)
         btn_row.pack(fill="x", pady=(0, 16))
 
@@ -51,6 +51,15 @@ class AppWindow(tk.Tk):
                  bg=styles.BG, fg=styles.MUTED,
                  font=("Segoe UI", 9)).pack(side="left", padx=12)
 
+        # Кнопка «Копировать всё» — справа
+        self._copy_all_var = tk.StringVar(value="Копировать всё")
+        self.copy_all_btn = ttk.Button(btn_row,
+                                       textvariable=self._copy_all_var,
+                                       style="Browse.TButton",
+                                       command=self._copy_all,
+                                       state="disabled")
+        self.copy_all_btn.pack(side="right")
+
         # Карточки
         self.stat_cards = StatCards(pad)
         self.stat_cards.pack(fill="x", pady=(0, 12))
@@ -59,7 +68,7 @@ class AppWindow(tk.Tk):
         self.table = ResultsTable(pad)
         self.table.pack(fill="both", expand=True)
 
-    # ── Действия ──────────────────────────────────────────────────────────────
+    # ── Рассчитать ────────────────────────────────────────────────────────────
 
     def _start(self):
         path = self.file_picker.path
@@ -68,6 +77,7 @@ class AppWindow(tk.Tk):
                                    "Укажите путь к файлу или папке.")
             return
         self.analyze_btn.configure(state="disabled")
+        self.copy_all_btn.configure(state="disabled")
         self._status_var.set("Обработка…")
         self.table.clear()
         self.stat_cards.reset()
@@ -94,6 +104,7 @@ class AppWindow(tk.Tk):
         n = len(result.sheets)
         self._status_var.set(f"Готово · {n} лист{'ов' if n != 1 else ''}")
         self.analyze_btn.configure(state="normal")
+        self.copy_all_btn.configure(state="normal")
 
     def _show_folder(self, result):
         self.table.populate_folder(result)
@@ -103,8 +114,26 @@ class AppWindow(tk.Tk):
         n = len(result.files)
         self._status_var.set(f"Готово · {n} файл{'ов' if n % 10 != 1 or n % 100 == 11 else ''} обработано")
         self.analyze_btn.configure(state="normal")
+        self.copy_all_btn.configure(state="normal")
 
     def _error(self, message: str):
         self._status_var.set("Ошибка при обработке")
         self.analyze_btn.configure(state="normal")
         messagebox.showerror("Ошибка", message)
+
+    # ── Копировать всё ────────────────────────────────────────────────────────
+
+    def _copy_all(self):
+        """Копирует всю таблицу как TSV в буфер обмена."""
+        tsv = self.table.get_all_as_tsv()
+        if not tsv.strip():
+            return
+
+        self.clipboard_clear()
+        self.clipboard_append(tsv)
+        self.update()
+
+        # Кратковременная обратная связь
+        self._copy_all_var.set(f"{ICON_SUCCESS} Скопировано")
+        self.after(COPY_REVERT_MS,
+                   lambda: self._copy_all_var.set("Копировать всё"))
