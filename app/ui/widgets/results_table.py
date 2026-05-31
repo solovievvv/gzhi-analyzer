@@ -1,81 +1,94 @@
 """
-Таблица результатов с поддержкой копирования строк и всего вывода.
+Таблица результатов с кнопками копирования дебита и кредита.
 
-Копирование строки:
-  - Клик на колонку 📋 → строка копируется в буфер → иконка меняется на ✓
-  - Через COPY_REVERT_MS миллисекунд иконка возвращается в 📋
+Копирование значения:
+  - Клик на 📋 рядом с дебитом → копирует число дебита
+  - Клик на 📋 рядом с кредитом → копирует число кредита
+  - Формат: "1234567,89" (без пробелов, запятая как разделитель)
+  - Иконка меняется на ✓, через COPY_REVERT_MS возвращается
 
 Копирование всего вывода:
-  - Кнопка «Копировать всё» → TSV (tab-separated) → вставляется по ячейкам
-    в Excel / Google Sheets
+  - Кнопка «Копировать всё» → TSV → вставляется по ячейкам в Excel/Sheets
 """
 import tkinter as tk
 import tkinter.ttk as ttk
-from typing import Optional
 
 from app.ui import styles
 from app.core.models import AnalysisResult, FolderResult
 
-# Через сколько мс иконка копирования возвращается обратно
 COPY_REVERT_MS = 2000
-
 ICON_COPY    = "📋"
 ICON_SUCCESS = "✓"
 
 
 def _fmt(v: float) -> str:
+    """Форматирование для отображения: '1 234 567,89'"""
     return f"{v:,.2f}".replace(",", " ").replace(".", ",")
 
 
-def _row_to_tsv(values: tuple) -> str:
-    """Одна строка таблицы → строка TSV (без колонки иконки)."""
-    return "\t".join(str(v) for v in values[:-1])  # последняя — иконка
+def _fmt_copy(v: float) -> str:
+    """Форматирование для копирования: '1234567,89'"""
+    return f"{v:.2f}".replace(".", ",")
+
+
+def _row_to_tsv(values: tuple, copy_cols: set[int]) -> str:
+    """Строка таблицы → TSV, пропуская колонки с иконками копирования."""
+    return "\t".join(
+        str(v) for i, v in enumerate(values)
+        if i not in copy_cols
+    )
 
 
 class ResultsTable(tk.Frame):
     """
-    Treeview с двумя режимами (файл / папка) и копированием.
+    Treeview с колонками-кнопками копирования рядом с дебитом и кредитом.
 
-    Архитектура копирования:
-      - _copy_col_id: идентификатор колонки с иконкой
-      - _revert_jobs: dict[item_id -> after_job] чтобы отменять старые таймеры
-      - _on_click: роутер — если клик по колонке 📋 → copy_row, иначе expand
+    Структура колонок:
+      name | debit | copy_d | credit | copy_c | diff | excluded | dedup | status
     """
 
-    _BASE_COLS    = ("name",     "debit",  "credit", "diff",    "excluded", "dedup",   "status")
-    _BASE_HEADERS = ("Название", "Дебит",  "Кредит", "Разница", "Вклады",   "Дубли",   "Статус")
-    _BASE_WIDTHS  = (200,         130,      130,       130,       80,         70,        110)
+    # Базовые колонки (без кнопок копирования)
+    _COLS = (
+        ("name",     "Название",        200, "w"),
+        ("debit",    "Дебит",           120, "e"),
+        ("copy_d",   "",                 36, "center"),
+        ("credit",   "Кредит",          120, "e"),
+        ("copy_c",   "",                 36, "center"),
+        ("diff",     "Разница",         120, "e"),
+        ("excluded", "Вклады",           70, "e"),
+        ("dedup",    "Дубли",            60, "e"),
+        ("status",   "Статус",          110, "w"),
+    )
 
-    _COPY_COL    = "copy_btn"
-    _COPY_HEADER = ""
-    _COPY_WIDTH  = 36
+    # Индексы колонок с иконками (для пропуска в TSV)
+    _COPY_D_IDX = 2
+    _COPY_C_IDX = 4
+    _COPY_COLS  = {_COPY_D_IDX, _COPY_C_IDX}
+
+    # Индексы значений дебита и кредита (для копирования числа)
+    _DEBIT_IDX  = 1
+    _CREDIT_IDX = 3
 
     def __init__(self, parent, **kwargs):
         super().__init__(parent, bg=styles.CARD, bd=0,
                          highlightthickness=1,
                          highlightbackground=styles.BORDER, **kwargs)
-        self._revert_jobs: dict[str, str] = {}  # item_id → after job id
+        self._revert_jobs: dict[str, dict[str, str]] = {}
         self._build()
 
     # ── Построение ────────────────────────────────────────────────────────────
 
     def _build(self):
-        all_cols    = self._BASE_COLS + (self._COPY_COL,)
-        all_headers = self._BASE_HEADERS + (self._COPY_HEADER,)
-        all_widths  = self._BASE_WIDTHS + (self._COPY_WIDTH,)
-
-        self.tree = ttk.Treeview(self, columns=all_cols,
+        col_ids = tuple(c[0] for c in self._COLS)
+        self.tree = ttk.Treeview(self, columns=col_ids,
                                  show="headings", style="Results.Treeview",
                                  selectmode="browse")
 
-        for col, hdr, w in zip(all_cols, all_headers, all_widths):
-            self.tree.heading(col, text=hdr)
-            if col == self._COPY_COL:
-                self.tree.column(col, width=w, minwidth=w,
-                                 anchor="center", stretch=False)
-            else:
-                anchor = "w" if col in ("name", "status") else "e"
-                self.tree.column(col, width=w, minwidth=50, anchor=anchor)
+        for col_id, header, width, anchor in self._COLS:
+            self.tree.heading(col_id, text=header)
+            stretch = col_id not in ("copy_d", "copy_c")
+            self.tree.column(col_id, width=width, minwidth=width if not stretch else 50,
+                             anchor=anchor, stretch=stretch)
 
         self._setup_tags()
 
@@ -97,80 +110,89 @@ class ResultsTable(tk.Frame):
         self.tree.tag_configure("sheet_row",  foreground=styles.MUTED)
         self.tree.tag_configure("dedup_warn", foreground="#B45309")
 
-    # ── Наполнение ────────────────────────────────────────────────────────────
+    # ── Вставка строк ─────────────────────────────────────────────────────────
 
-    def _insert(self, parent, values: tuple, tags: tuple,
-                open_: bool = False) -> str:
-        """Вставляет строку с иконкой копирования в последней ячейке."""
-        return self.tree.insert(
-            parent, "end",
-            values=values + (ICON_COPY,),
-            tags=tags,
-            open=open_,
-        )
+    def _make_row(self, name, debit, credit, diff, excluded, dedup, status,
+                  show_copy=True) -> tuple:
+        """Собирает кортеж значений с иконками копирования."""
+        icon = ICON_COPY if show_copy else ""
+        return (name, debit, icon, credit, icon, diff, excluded, dedup, status)
+
+    def _insert(self, parent, values: tuple, tags: tuple, open_=False) -> str:
+        return self.tree.insert(parent, "end", values=values,
+                                tags=tags, open=open_)
+
+    # ── Наполнение: один файл ─────────────────────────────────────────────────
 
     def populate_file(self, result: AnalysisResult):
         self.clear()
         for i, sheet in enumerate(result.sheets):
             tag = "error" if sheet.error else ("alt" if i % 2 else "ok")
             if sheet.error:
-                vals = (sheet.sheet_name, "—", "—", "—", "—", "—", f"⚠ {sheet.error}")
+                vals = self._make_row(
+                    sheet.sheet_name, "—", "—", "—", "—", "—",
+                    f"⚠ {sheet.error}", show_copy=False)
             else:
-                vals = (sheet.sheet_name,
-                        _fmt(sheet.debit), _fmt(sheet.credit),
-                        _fmt(sheet.difference),
-                        str(sheet.excluded_rows), "—", "✓ ОК")
+                vals = self._make_row(
+                    sheet.sheet_name,
+                    _fmt(sheet.debit), _fmt(sheet.credit),
+                    _fmt(sheet.difference),
+                    str(sheet.excluded_rows), "—", "✓ ОК")
             self._insert("", vals, (tag,))
 
-        self._insert("", (
+        self._insert("", self._make_row(
             "ИТОГО",
             _fmt(result.total_debit), _fmt(result.total_credit),
             _fmt(result.total_difference), "", "", "",
         ), ("total",))
 
+    # ── Наполнение: папка ─────────────────────────────────────────────────────
+
     def populate_folder(self, result: FolderResult):
         self.clear()
-        for i, file_result in enumerate(result.files):
+        for file_result in result.files:
             dedup_count = file_result.deduplicated_count
             dedup_label = str(dedup_count) if dedup_count else "—"
             status = "⚠ Есть ошибки" if file_result.has_errors else "✓ ОК"
             file_tag = "dedup_warn" if dedup_count else "file_row"
 
-            node = self._insert("", (
+            node = self._insert("", self._make_row(
                 f"📄 {file_result.filename}",
-                _fmt(file_result.total_debit),
-                _fmt(file_result.total_credit),
+                _fmt(file_result.total_debit), _fmt(file_result.total_credit),
                 _fmt(file_result.total_difference),
                 "", dedup_label, status,
             ), (file_tag,), open_=False)
 
             for sheet in file_result.sheets:
-                sheet_tag = "error" if sheet.error else "sheet_row"
+                tag = "error" if sheet.error else "sheet_row"
                 if sheet.error:
-                    s_vals = (f"  └ {sheet.sheet_name}",
-                              "—", "—", "—", "—", "—", f"⚠ {sheet.error}")
+                    s_vals = self._make_row(
+                        f"  └ {sheet.sheet_name}",
+                        "—", "—", "—", "—", "—",
+                        f"⚠ {sheet.error}", show_copy=False)
                 else:
-                    s_vals = (f"  └ {sheet.sheet_name}",
-                              _fmt(sheet.debit), _fmt(sheet.credit),
-                              _fmt(sheet.difference),
-                              str(sheet.excluded_rows), "—", "")
-                self._insert(node, s_vals, (sheet_tag,))
+                    s_vals = self._make_row(
+                        f"  └ {sheet.sheet_name}",
+                        _fmt(sheet.debit), _fmt(sheet.credit),
+                        _fmt(sheet.difference),
+                        str(sheet.excluded_rows), "—", "")
+                self._insert(node, s_vals, (tag,))
 
             if file_result.deduplicated:
-                dup_node = self._insert(node, (
+                dup_node = self._insert(node, self._make_row(
                     f"  └ ⚠ Исключено дублей: {dedup_count}",
-                    "", "", "", "", "", "",
+                    "", "", "", "", "", "", show_copy=False,
                 ), ("dedup_warn",))
                 for dr in file_result.deduplicated:
                     d_str = str(dr.row.date) if dr.row.date else "б/д"
-                    self._insert(dup_node, (
+                    self._insert(dup_node, self._make_row(
                         f"    • {d_str}  уже в: {dr.original_file}",
                         _fmt(dr.row.debit) if dr.row.debit else "—",
                         _fmt(dr.row.credit) if dr.row.credit else "—",
-                        "", "", "", "",
+                        "", "", "", "", show_copy=False,
                     ), ("dedup_warn",))
 
-        self._insert("", (
+        self._insert("", self._make_row(
             "ИТОГО ПО ПАПКЕ (без дублей)",
             _fmt(result.total_debit), _fmt(result.total_credit),
             _fmt(result.total_difference),
@@ -178,56 +200,75 @@ class ResultsTable(tk.Frame):
         ), ("total",))
 
     def clear(self):
-        # Отменяем все pending таймеры
-        for job in self._revert_jobs.values():
-            self.tree.after_cancel(job)
+        for jobs in self._revert_jobs.values():
+            for job in jobs.values():
+                try:
+                    self.tree.after_cancel(job)
+                except Exception:
+                    pass
         self._revert_jobs.clear()
         self.tree.delete(*self.tree.get_children())
 
-    # ── Копирование строки ────────────────────────────────────────────────────
+    # ── Обработка кликов ──────────────────────────────────────────────────────
 
     def _on_click(self, event: tk.Event):
-        """Роутер кликов: копирование по иконке, остальное — стандартное."""
-        col = self.tree.identify_column(event.x)
+        col = self.tree.identify_column(event.x)   # "#1", "#2", …
         row = self.tree.identify_row(event.y)
         if not row:
             return
-        # Колонки нумеруются #1, #2… — копирование в последней
-        total_cols = len(self._BASE_COLS) + 1
-        if col == f"#{total_cols}":
-            self._copy_row(row)
 
-    def _copy_row(self, item_id: str):
-        """Копирует строку в буфер, показывает ✓, через COPY_REVERT_MS возвращает 📋."""
-        values = self.tree.item(item_id, "values")
-        if not values:
+        col_num = int(col.lstrip("#")) - 1          # 0-based
+
+        if col_num == self._COPY_D_IDX:
+            self._copy_value(row, self._DEBIT_IDX, "d")
+        elif col_num == self._COPY_C_IDX:
+            self._copy_value(row, self._CREDIT_IDX, "c")
+
+    def _copy_value(self, item_id: str, value_idx: int, key: str):
+        """
+        Копирует числовое значение из value_idx в буфер.
+        key: 'd' для дебита, 'c' для кредита — разделяет таймеры.
+        """
+        values = list(self.tree.item(item_id, "values"))
+        raw = values[value_idx]
+
+        # Пропускаем нечисловые ячейки
+        if not raw or raw in ("—", ""):
             return
 
-        tsv = _row_to_tsv(values)
-        self._clipboard_set(tsv)
+        # Преобразуем отображаемый формат обратно в число для копирования:
+        # "1 234 567,89" → "1234567,89"
+        number_str = raw.replace(" ", "").replace("\xa0", "")
+        # Уже с запятой как разделителем — оставляем как есть
+        self._clipboard_set(number_str)
 
-        # Меняем иконку на ✓
-        new_vals = list(values)
-        new_vals[-1] = ICON_SUCCESS
-        self.tree.item(item_id, values=new_vals)
+        # Меняем иконку рядом с нужным столбцом
+        icon_idx = self._COPY_D_IDX if key == "d" else self._COPY_C_IDX
+        values[icon_idx] = ICON_SUCCESS
+        self.tree.item(item_id, values=values)
 
-        # Отменяем старый таймер если был
-        if item_id in self._revert_jobs:
-            self.tree.after_cancel(self._revert_jobs[item_id])
+        # Отменяем старый таймер для этой ячейки
+        jobs = self._revert_jobs.setdefault(item_id, {})
+        if key in jobs:
+            try:
+                self.tree.after_cancel(jobs[key])
+            except Exception:
+                pass
 
-        # Планируем возврат иконки
-        job = self.tree.after(COPY_REVERT_MS, lambda: self._revert_icon(item_id))
-        self._revert_jobs[item_id] = job
+        job = self.tree.after(
+            COPY_REVERT_MS,
+            lambda: self._revert_icon(item_id, icon_idx, key)
+        )
+        jobs[key] = job
 
-    def _revert_icon(self, item_id: str):
-        """Возвращает иконку 📋 после таймера."""
+    def _revert_icon(self, item_id: str, icon_idx: int, key: str):
         try:
             values = list(self.tree.item(item_id, "values"))
-            values[-1] = ICON_COPY
+            values[icon_idx] = ICON_COPY
             self.tree.item(item_id, values=values)
         except tk.TclError:
-            pass  # строка уже удалена (clear был вызван)
-        self._revert_jobs.pop(item_id, None)
+            pass
+        self._revert_jobs.get(item_id, {}).pop(key, None)
 
     def _clipboard_set(self, text: str):
         self.tree.clipboard_clear()
@@ -237,18 +278,15 @@ class ResultsTable(tk.Frame):
     # ── TSV для «Копировать всё» ──────────────────────────────────────────────
 
     def get_all_as_tsv(self) -> str:
-        """
-        Возвращает всё содержимое таблицы как TSV.
-        Заголовок + строки верхнего уровня (без дочерних деталей).
-        Вставляется по ячейкам в Excel / Google Sheets.
-        """
-        header = "\t".join(self._BASE_HEADERS)
-        lines = [header]
+        """Вся таблица как TSV без колонок-иконок."""
+        headers = [c[1] for i, c in enumerate(self._COLS)
+                   if i not in self._COPY_COLS]
+        lines = ["\t".join(headers)]
 
         def collect(item):
             values = self.tree.item(item, "values")
             if values:
-                lines.append(_row_to_tsv(values))
+                lines.append(_row_to_tsv(values, self._COPY_COLS))
             for child in self.tree.get_children(item):
                 collect(child)
 
