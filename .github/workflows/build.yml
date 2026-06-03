@@ -21,7 +21,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install pyinstaller openpyxl
+        run: pip install pyinstaller openpyxl xlrd
 
       - name: Build exe
         run: pyinstaller expense_analyzer.spec
@@ -49,7 +49,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install pyinstaller openpyxl
+        run: pip install pyinstaller openpyxl xlrd
 
       - name: Build app
         run: pyinstaller expense_analyzer.spec
