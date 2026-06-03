@@ -81,7 +81,7 @@ class StatCards(tk.Frame):
         number_str = _fmt_copy(self._values[title])
         self.clipboard_clear()
         self.clipboard_append(number_str)
-        self.update()
+        tk.Frame.update(self)  # flush clipboard, не вызывать наш update()
 
         self._copy_vars[title].set(ICON_SUCCESS)
 
