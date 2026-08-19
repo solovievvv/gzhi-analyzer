@@ -6,11 +6,21 @@ import os
 
 block_cipher = None
 
+# Библиотеки с динамическими импортами и файлами-ресурсами (шаблон docx,
+# CMap-ресурсы pdfminer и т.п.) — собираем целиком, иначе .exe упадёт при импорте.
+from PyInstaller.utils.hooks import collect_all
+_extra_datas, _extra_binaries, _extra_hidden = [], [], []
+for _pkg in ('docx', 'pdfplumber', 'pdfminer', 'PIL'):
+    _d, _b, _h = collect_all(_pkg)
+    _extra_datas += _d
+    _extra_binaries += _b
+    _extra_hidden += _h
+
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
-    datas=[],
+    binaries=_extra_binaries,
+    datas=_extra_datas,
     hiddenimports=[
         'openpyxl',
         'openpyxl.cell',
@@ -21,7 +31,7 @@ a = Analysis(
         'tkinter.ttk',
         'tkinter.filedialog',
         'tkinter.messagebox',
-    ],
+    ] + _extra_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
