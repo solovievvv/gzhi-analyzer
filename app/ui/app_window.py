@@ -112,7 +112,14 @@ class AppWindow(tk.Tk):
                                result.total_credit,
                                result.total_difference)
         n = len(result.files)
-        self._status_var.set(f"Готово · {n} файл{'ов' if n % 10 != 1 or n % 100 == 11 else ''} обработано")
+        status = f"Готово · {n} файл{'ов' if n % 10 != 1 or n % 100 == 11 else ''} обработано"
+        # Прозрачность дедупа: карточки показывают итог С дедупом, здесь — итог
+        # БЕЗ дедупа и сколько дублей убрано (вариант B).
+        if result.total_deduplicated:
+            status += (f"  ·  без дедупа: К {result.raw_total_credit:,.2f}"
+                       f" / Д {result.raw_total_debit:,.2f}"
+                       f"  (убрано дублей: {result.total_deduplicated})")
+        self._status_var.set(status)
         self.analyze_btn.configure(state="normal")
         self.copy_all_btn.configure(state="normal")
 

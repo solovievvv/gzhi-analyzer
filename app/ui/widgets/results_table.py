@@ -153,15 +153,44 @@ class ResultsTable(tk.Frame):
         for file_result in result.files:
             dedup_count = file_result.deduplicated_count
             dedup_label = str(dedup_count) if dedup_count else "—"
-            status = "⚠ Есть ошибки" if file_result.has_errors else "✓ ОК"
-            file_tag = "dedup_warn" if dedup_count else "file_row"
+
+            # Статус строго программно: посчитано / ошибка чтения / нет операций,
+            # а для посчитанных — результат сверки с оборотом банка из файла.
+            st = file_result.status
+            if st == "ok":
+                d_s = _fmt(file_result.total_debit)
+                c_s = _fmt(file_result.total_credit)
+                diff_s = _fmt(file_result.total_difference)
+                rec = file_result.reconciled
+                if rec is True:
+                    status = "✓ сверено с банком"
+                    file_tag = "dedup_warn" if dedup_count else "file_row"
+                elif rec is False:
+                    status = "⚠ не сошлось — проверить"
+                    file_tag = "dedup_warn"   # оранжевый — привлечь внимание
+                else:
+                    status = "✓ посчитано"
+                    file_tag = "dedup_warn" if dedup_count else "file_row"
+            else:
+                # Ошибка чтения или нет операций — сумм нет, показываем прочерки.
+                icon = {"read_error": "✗", "no_data": "—"}[st]
+                status = f"{icon} {file_result.status_label}"
+                d_s = c_s = diff_s = "—"
+                file_tag = "error" if st == "read_error" else "sheet_row"
 
             node = self._insert("", self._make_row(
                 f"📄 {file_result.filename}",
-                _fmt(file_result.total_debit), _fmt(file_result.total_credit),
-                _fmt(file_result.total_difference),
+                d_s, c_s, diff_s,
                 "", dedup_label, status,
+                show_copy=(st == "ok"),
             ), (file_tag,), open_=False)
+
+            # Файловая ошибка чтения (файл не открылся) — показываем причину.
+            if file_result.error:
+                self._insert(node, self._make_row(
+                    f"  └ ⚠ {file_result.error}",
+                    "—", "—", "—", "—", "—", "", show_copy=False,
+                ), ("error",))
 
             for sheet in file_result.sheets:
                 tag = "error" if sheet.error else "sheet_row"
